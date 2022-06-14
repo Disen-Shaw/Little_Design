@@ -1,0 +1,161 @@
+
+extern float temprature;
+extern float humidity;
+extern int smoke_number;
+extern int light_status;
+
+/*
+   {
+   网络设备信息
+   "ProductKey": "h6h3xzNbJtR",
+   "DeviceName": "LiteOS_ESP32",
+   "DeviceSecret": "00f5b4817982738bcd8a2d8980311839"
+   }
+ */
+
+/* 设备的三元组信息*/
+#define PRODUCT_KEY "h6h3xzNbJtR"
+#define DEVICE_NAME "LiteOS_ESP32"
+#define DEVICE_SECRET "00f5b4817982738bcd8a2d8980311839"
+#define REGION_ID "cn-shanghai"
+
+/* 线上环境域名和端口号 */
+#define MQTT_SERVER PRODUCT_KEY ".iot-as-mqtt." REGION_ID ".aliyuncs.com"
+#define MQTT_PORT 1883
+#define MQTT_USRNAME DEVICE_NAME "&" PRODUCT_KEY
+
+/* MQTT 设备客户端 ID  和 密码 */
+#define CLIENT_ID "h6h3xzNbJtR.LiteOS_ESP32|securemode=2,signmethod=hmacsha256,timestamp=1653380843354|"
+#define MQTT_PASSWD "58c32939ee325b20e9c86a7297b22a66088649e769ecbb62169021f30f2161bc"
+
+/* 报文格式 */
+#define ALINK_BODY_FORMAT "{\"id\":\"dht11\",\"version\":\"1.0\",\"method\":\"thing.event.property.post\",\"params\":%s}"
+/* 主题 */
+#define ALINK_TOPIC_PROP_POST "/sys/" PRODUCT_KEY "/" DEVICE_NAME "/thing/event/property/post"
+
+/**
+ * @brief MQTT
+ */
+WiFiClient esp32_client;
+PubSubClient mqtt_client(esp32_client);
+unsigned long last_ms = 0;
+
+/**
+ * @brief MQTT 回调函数
+ *
+ * @param topic
+ * @param payload
+ * @param length
+ */
+void static callback(char* topic, byte* payload, unsigned int length)
+{
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("] ");
+  payload[length] = '\0';
+  Serial.println((char*)payload);
+}
+
+/**
+ * @brief 检查 MQTT 服务连接
+ */
+void static check_connection(void)
+{
+  // 检测连接
+  while (!mqtt_client.connected()) {
+    Serial.println("Connecting to MQTT Server ...");
+    if (mqtt_client.connect(CLIENT_ID, MQTT_USRNAME, MQTT_PASSWD)) {
+      Serial.println("MQTT Connected!");
+    } else {
+      Serial.print("MQTT Connect err:");
+      Serial.println(mqtt_client.state());
+      delay(5000);
+    }
+  }
+}
+
+void static aliyun_update(void)
+{
+  char param[32];
+  char jsonBuf[128];
+  sprintf(param, "{\"liteos_temprature\":%f}", temprature);
+  sprintf(jsonBuf, ALINK_BODY_FORMAT, param);
+  // 获得了上传的数据
+  Serial.println(jsonBuf);
+
+  // 上传温度信息
+  boolean d = mqtt_client.publish(ALINK_TOPIC_PROP_POST, jsonBuf);
+  if (d) {
+    Serial.println("publish Temperature success");
+  } else {
+    Serial.println("publish Temperature fail");
+  }
+
+  // 上传湿度信息
+  sprintf(param, "{\"liteos_humidity\":%f}", humidity);
+  sprintf(jsonBuf, ALINK_BODY_FORMAT, param);
+  Serial.println(jsonBuf);
+  d = mqtt_client.publish(ALINK_TOPIC_PROP_POST, jsonBuf);
+  if (d) {
+    Serial.println("publish Humidity success");
+  } else {
+    Serial.println("publish Humidity fail");
+  }
+
+  // 上传烟雾信息
+  sprintf(param, "{\"liteos_smoke\":%d}", smoke_number);
+  sprintf(jsonBuf, ALINK_BODY_FORMAT, param);
+  Serial.println(jsonBuf);
+  d = mqtt_client.publish(ALINK_TOPIC_PROP_POST, jsonBuf);
+  if (d) {
+    Serial.println("publish Smoke_Number success");
+  } else {
+    Serial.println("publish Smoke_Number fail");
+  }
+
+  // 上传光照信息
+  String light_upload;
+  if (light_status == 1) {
+    light_upload = "Dark";
+  } else {
+    light_upload = "Normal";
+  }
+  sprintf(param, "{\"liteos_light\":%s}", light_upload.c_str());
+  sprintf(jsonBuf, ALINK_BODY_FORMAT, param);
+  Serial.println(jsonBuf);
+  d = mqtt_client.publish(ALINK_TOPIC_PROP_POST, jsonBuf);
+  if (d) {
+    Serial.println("publish Light Information success");
+  } else {
+    Serial.println("publish Light Information fail");
+  }
+}
+
+/**
+ * @brief 连接阿里云 MQTT 服务器
+ */
+void aliyun_mqtt_connect(void)
+{
+  // 设置服务器信息
+  mqtt_client.setServer(MQTT_SERVER, MQTT_PORT);
+  // 设置回调函数
+  mqtt_client.setCallback(callback);
+  // 等待连接
+  check_connection();
+}
+
+/**
+ * @brief 上传阿里云数据
+ */
+void aliyun_update_info(void)
+{
+  if (millis() - last_ms > 1000) {
+    last_ms = millis();
+    // 检查连接
+    check_connection();
+    aliyun_update();
+  }
+
+  // 保持心跳
+  mqtt_client.loop();
+}
